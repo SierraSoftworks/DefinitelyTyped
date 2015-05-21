@@ -1,20 +1,31 @@
-// Type definitions for Rethinkdb 1.10.0
+// Type definitions for Rethinkdb 2.0.0
 // Project: http://rethinkdb.com/
-// Definitions by: Sean Hess <https://seanhess.github.io/>
+// Definitions by: Sean Hess <https://seanhess.github.io/> and Benjamin Pannell <https://github.com/spartan563>
 // Definitions: https://github.com/borisyankov/DefinitelyTyped
 // Reference: http://www.rethinkdb.com/api/#js
 // TODO: Document manipulation and below
 
-declare module "rethinkdb" {
+/// <reference path="../es6-promise/es6-promise.d.ts" />
+/// <reference path="../node/node.d.ts" />
 
-  export function connect(host:ConnectionOptions, cb:(err:Error, conn:Connection)=>void);
+declare module "rethinkdb" {
+  import events = require('events');
+
+  export function connect(host:string, cb:(err:Error, conn:Connection)=>void);
+  export function connect(host:string): Promise<Connection>;
+  export function connect(options:ConnectionOptions, cb:(err:Error, conn:Connection)=>void);
+  export function connect(options:ConnectionOptions): Promise<Connection>;
 
   export function dbCreate(name:string):Operation<CreateResult>;
   export function dbDrop(name:string):Operation<DropResult>;
   export function dbList():Operation<string[]>;
 
+  export function changes(options: { squash?: boolean, includeStates?: boolean }): Operation<any>;
+  export function changes<T>(options: { squash?: boolean, includeStates?: boolean }): Operation<T>;
+
   export function db(name:string):Db;
-  export function table(name:string, options?:{useOutdated:boolean}):Table;
+  export function table(name:string, options?:{useOutdated:boolean}):Table<any>;
+  export function table<T>(name:string, options?:{useOutdated:boolean}):Table<T>;
 
   export function asc(property:string):Sort;
   export function desc(property:string):Sort;
@@ -32,12 +43,16 @@ declare module "rethinkdb" {
   export function branch(test:Expression<boolean>, trueBranch:Expression<any>, falseBranch:Expression<any>):Expression<any>;
 
 
-  export class Cursor {
-    hasNext():boolean;
-    each(cb:(err:Error, row:any)=>void, done?:()=>void);
-    each(cb:(err:Error, row:any)=>boolean, done?:()=>void); // returning false stops iteration
-    next(cb:(err:Error, row:any) => void);
-    toArray(cb:(err:Error, rows:any[]) => void);
+  export class Cursor<T> extends events.EventEmitter {
+    each(cb:(err:Error, row:T)=>void, done?:()=>void);
+    each(cb:(err:Error, row:T)=>boolean, done?:()=>void); // returning false stops iteration
+
+    next(callback: (err:Error, row:T) => void);
+    next(): Promise<T>;
+
+    toArray(callback: (err:Error, rows:T[]) => void);
+    toArray(): Promise<T[]>;
+
     close();
   }
 
@@ -48,19 +63,24 @@ declare module "rethinkdb" {
     authKey?:string;
   }
 
-  interface Connection {
-    close();
-    reconnect(cb:(err:Error, conn:Connection)=>void);
+  interface Connection extends events.EventEmitter {
+    close(options?: { noreplyWait: boolean }): Promise<any>;
+    close(callback: (err: Error) => void);
+    close(options: { noreplyWait: boolean }, callback: (err: Error) => void);
+    reconnect(options?: { noreplyWait: boolean }): Promise<Connection>;
+    reconnect(callback: (err: Error, conn: Connection) => void);
+    reconnect(options: { noreplyWait: boolean }, callback: (err: Error, conn: Connection) => void);
     use(dbName:string);
-    addListener(event:string, cb:Function);
-    on(event:string, cb:Function);
+    noreplyWait(callback: (err: Error) => void);
+    noreplyWait(): Promise<any>;
   }
 
   interface Db {
     tableCreate(name:string, options?:TableOptions):Operation<CreateResult>;
     tableDrop(name:string):Operation<DropResult>;
     tableList():Operation<string[]>;
-    table(name:string, options?:GetTableOptions):Table;
+    table(name:string, options?:GetTableOptions):Table<any>;
+    table<T>(name:string, options?:GetTableOptions):Table<T>;
   }
 
   interface TableOptions {
@@ -81,69 +101,88 @@ declare module "rethinkdb" {
     delete(options?:UpdateOptions):Operation<WriteResult>;
   }
 
-  interface Table extends Sequence {
+  interface Table<T> extends Sequence<T> {
     indexCreate(name:string, index?:ExpressionFunction<any>):Operation<CreateResult>;
     indexDrop(name:string):Operation<DropResult>;
     indexList():Operation<string[]>;
 
-    insert(obj:any[], options?:InsertOptions):Operation<WriteResult>;
-    insert(obj:any, options?:InsertOptions):Operation<WriteResult>;
+    insert(obj:T[], options?:InsertOptions):Operation<WriteResult>;
+    insert(obj:T, options?:InsertOptions):Operation<WriteResult>;
 
-    get(key:string):Sequence; // primary key
-    getAll(key:string, index?:Index):Sequence; // without index defaults to primary key
-    getAll(...keys:string[]):Sequence;
+    get(key:string):Sequence<T>; // primary key
+    getAll(key:string, index?:Index):Sequence<T>; // without index defaults to primary key
+    getAll(...keys:string[]):Sequence<T>;
   }
 
-  interface Sequence extends Operation<Cursor>, Writeable {
+  interface Sequence<T> extends Operation<Cursor<T>>, Writeable {
+    (attr: string): Expression<any>;
 
-    between(lower:any, upper:any, index?:Index):Sequence;
-    filter(rql:ExpressionFunction<boolean>):Sequence;
-    filter(rql:Expression<boolean>):Sequence;
-    filter(obj:{[key:string]:any}):Sequence;
+    between(lower:any, upper:any, index?:Index):Sequence<T>;
+    filter(rql:ExpressionFunction<boolean>):Sequence<T>;
+    filter(rql:Expression<boolean>):Sequence<T>;
+    filter(obj:{[key:string]:any}):Sequence<T>;
 
 
     // Join
     // these return left, right
-    innerJoin(sequence:Sequence, join:JoinFunction<boolean>):Sequence;
-    outerJoin(sequence:Sequence, join:JoinFunction<boolean>):Sequence;
-    eqJoin(leftAttribute:string, rightSequence:Sequence, index?:Index):Sequence;
-    eqJoin(leftAttribute:ExpressionFunction<any>, rightSequence:Sequence, index?:Index):Sequence;
-    zip():Sequence;
+    innerJoin<U>(sequence:Sequence<U>, join:JoinFunction<boolean>):Sequence<{ left: T, right: U }>;
+    outerJoin<U>(sequence:Sequence<U>, join:JoinFunction<boolean>):Sequence<{ left: T, right: U }>;
+    eqJoin<U>(leftAttribute:string, rightSequence:Sequence<U>, index?:Index):Sequence<{ left: T, right: U }>;
+    eqJoin<U>(leftAttribute:ExpressionFunction<any>, rightSequence:Sequence<U>, index?:Index):Sequence<{ left: T, right: U }>;
+    zip<U>():Sequence<U>;
 
     // Transform
-    map(transform:ExpressionFunction<any>):Sequence;
-    withFields(...selectors:any[]):Sequence;
-    concatMap(transform:ExpressionFunction<any>):Sequence;
-    orderBy(...keys:string[]):Sequence;
-    orderBy(...sorts:Sort[]):Sequence;
-    skip(n:number):Sequence;
-    limit(n:number):Sequence;
-    slice(start:number, end?:number):Sequence;
+    map<U>(transform:ExpressionFunction<U>):Sequence<U>;
+
+    withFields(...selectors:any[]):Sequence<any>;
+    concatMap<U>(transform:ExpressionFunction<U>):Sequence<U>;
+    orderBy(...keys:string[]):Sequence<T>;
+    orderBy(...sorts:Sort[]):Sequence<T>;
+    skip(n:number):Sequence<T>;
+    limit(n:number):Sequence<T>;
+    slice(start:number, end?:number):Sequence<T>;
     nth(n:number):Expression<any>;
-    indexesOf(obj:any):Sequence;
+    indexesOf(obj:any):Sequence<T>;
     isEmpty():Expression<boolean>;
-    union(sequence:Sequence):Sequence;
-    sample(n:number):Sequence;
+    union(sequence:Sequence<T>):Sequence<T>;
+    sample(n:number):Sequence<T>;
 
     // Aggregate
     reduce(r:ReduceFunction<any>, base?:any):Expression<any>;
     count():Expression<number>;
-    distinct():Sequence;
-    groupedMapReduce(group:ExpressionFunction<any>, map:ExpressionFunction<any>, reduce:ReduceFunction<any>, base?:any):Sequence;
-    groupBy(...aggregators:Aggregator[]):Expression<Object>; // TODO: reduction object
-    contains(prop:string):Expression<boolean>;
+
+    sum(field: string): number;
+    sum(fn: ExpressionFunction<number>): Expression<number>;
+
+    avg(field: string): number;
+    avg(fn: ExpressionFunction<number>): Expression<number>;
+
+    max(field: string): number;
+    max(fn: ExpressionFunction<number>): Expression<number>;
+
+    min(field: string): number;
+    min(fn: ExpressionFunction<number>): Expression<number>;
+
+    distinct():Sequence<T>;
+    groupedMapReduce(group:ExpressionFunction<any>, map:ExpressionFunction<any>, reduce:ReduceFunction<any>, base?:any):Sequence<T>;
+
+    group(...aggregators:Aggregator[]):Expression<{ group: any, reduction: T[] }>;
+    reduce<U>(reductionFunction: (left: Expression<U>, right: Expression<U>) => U): Expression<U>;
+
+    contains(...values: any[]): Expression<boolean>;
+    contains(...predicates: ExpressionFunction<boolean>[]): Expression<boolean>;
 
     // Manipulation
-    pluck(...props:string[]):Sequence;
-    without(...props:string[]):Sequence;
+    pluck(...props:string[]):Sequence<T>;
+    without(...props:string[]):Sequence<T>;
   }
 
   interface ExpressionFunction<U> {
-    (doc:Expression<any>):Expression<U>; 
+    (doc:Expression<any>):Expression<U>;
   }
 
   interface JoinFunction<U> {
-    (left:Expression<any>, right:Expression<any>):Expression<U>; 
+    (left:Expression<any>, right:Expression<any>):Expression<U>;
   }
 
   interface ReduceFunction<U> {
@@ -151,15 +190,15 @@ declare module "rethinkdb" {
   }
 
   interface InsertOptions {
-    upsert: boolean; // true
-    durability: string; // 'soft'
-    return_vals: boolean; // false
+    conflict?: string; // 'error'
+    durability?: string; // 'soft'
+    returnChanges?: boolean; // false
   }
 
   interface UpdateOptions {
     non_atomic: boolean;
     durability: string; // 'soft'
-    return_vals: boolean; // false    
+    returnChanges: boolean; // false
   }
 
   interface WriteResult {
@@ -167,10 +206,12 @@ declare module "rethinkdb" {
     replaced: number;
     unchanged: number;
     errors: number;
+    warnings: string;
     deleted: number;
     skipped: number;
     first_error: Error;
-    generated_keys: string[]; // only for insert
+    generated_keys?: string[]; // only for insert
+    changes?: { old_val: any, new_val: any }[];
   }
 
   interface JoinResult {
@@ -193,7 +234,7 @@ declare module "rethinkdb" {
   }
 
   interface Expression<T> extends Writeable, Operation<T> {
-      (prop:string):Expression<any>; 
+      (prop:string):Expression<any>;
       merge(query:Expression<Object>):Expression<Object>;
       append(prop:string):Expression<Object>;
       contains(prop:string):Expression<boolean>;
@@ -221,7 +262,8 @@ declare module "rethinkdb" {
   }
 
   interface Operation<T> {
-   run(conn:Connection, cb:(err:Error, result:T)=>void); 
+   run(conn:Connection, cb:(err:Error, result:T)=>void);
+   run(conn:Connection): Promise<T>;
   }
 
   interface Aggregator {}
